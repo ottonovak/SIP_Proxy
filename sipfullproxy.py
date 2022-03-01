@@ -20,6 +20,7 @@ import socket
 # import threading
 import sys
 import time
+from datetime import datetime
 import logging
 
 HOST, PORT = '192.168.0.194', 5060
@@ -70,6 +71,34 @@ topvia = ""
 registrar = {}
 
 
+
+def writeCalls(call: str):
+        f = open("callHistory.log", "a")
+        f.write(call + "\n")
+        f.close
+
+def login():
+    logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', filename='proxy.log', level=logging.INFO,
+                        datefmt='%H:%M:%S')
+
+def start_server():
+    global topvia, recordroute
+    logging.info(time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime()))
+    hostname = socket.gethostname()
+    logging.info(hostname)
+    ipaddress = socket.gethostbyname(hostname)
+    if ipaddress == "127.0.0.1":
+        ipaddress = sys.argv[1]
+    logging.info(ipaddress)
+    recordroute = "Record-Route: <sip:%s:%d;lr>" % (ipaddress, PORT)
+    topvia = "Via: SIP/2.0/UDP %s:%d" % (ipaddress, PORT)
+    server = socketserver.UDPServer((HOST, PORT), UDPHandler)
+    server.serve_forever()
+
+def showtime():
+    logging.debug(time.strftime("(%H:%M:%S)", time.localtime()))
+
+
 def hexdump(chars, sep, width):
     while chars:
         line = chars[:width]
@@ -82,8 +111,10 @@ def quotechars(chars):
     return ''.join(['.', c][c.isalnum()] for c in chars)
 
 
-def showtime():
-    logging.debug(time.strftime("(%H:%M:%S)", time.localtime()))
+
+
+    
+    
 
 
 class UDPHandler(socketserver.BaseRequestHandler):
@@ -248,7 +279,7 @@ class UDPHandler(socketserver.BaseRequestHandler):
             #if registrar.has_key(fromm):
             if fromm in registrar:
                 del registrar[fromm]
-            self.sendResponse("488 Not Acceptable Here")
+            self.sendResponse("488 Not Acceptable Here - ")
             return
         if len(contact_expires) > 0:
             expires = int(contact_expires)
@@ -279,7 +310,9 @@ class UDPHandler(socketserver.BaseRequestHandler):
         origin = self.getOrigin()
         #if len(origin) == 0 or not registrar.has_key(origin):
         if len(origin) == 0 or not origin in registrar:
-            self.sendResponse("400 Bad Request")
+        # Úprava SIP stavových kódov z zdrojovom kóde proxy, napr. “486 Busy Here” zmeníte na “486 Obsadené”
+        # Vola pc2 -> pc1, ale pc1 nie je pripojeny
+            self.sendResponse("400 Zla poziadavka (Bad Request)")
             return
         destination = self.getDestination()
         if len(destination) > 0:
@@ -354,6 +387,9 @@ class UDPHandler(socketserver.BaseRequestHandler):
         else:
             self.sendResponse("500 Server Internal Error")
 
+    
+    
+
     def processCode(self):
         origin = self.getOrigin()
         if len(origin) > 0:
@@ -363,6 +399,10 @@ class UDPHandler(socketserver.BaseRequestHandler):
                 socket, claddr = self.getSocketInfo(origin)
                 self.data = self.removeRouteHeader()
                 data = self.removeTopVia()
+                if "603" in data[0]:
+                    now = datetime.now()
+                    date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
+                    writeCalls(str(date_time) + " - Hovor odmietnuty od" + self.getDestination() + "od" + self.getOrigin())
 
                 text = text = "\r\n".join(data)
                 socket.sendto(text.encode("utf-8"), claddr)
@@ -378,10 +418,16 @@ class UDPHandler(socketserver.BaseRequestHandler):
                 self.processRegister()
             elif rx_invite.search(request_uri):
                 self.processInvite()
+                now = datetime.now()
+                date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
+                writeCalls(str(date_time) +" - Volane od " + self.getOrigin() + " na " + self.getDestination())
             elif rx_ack.search(request_uri):
                 self.processAck()
             elif rx_bye.search(request_uri):
                 self.processNonInvite()
+                now = datetime.now()
+                date_time = now.strftime("%m/%d/%Y, %H:%M:%S")
+                writeCalls(str(date_time) + " - Ukonceny hovor od " + self.getOrigin() + " na " + self.getDestination())
             elif rx_cancel.search(request_uri):
                 self.processNonInvite()
             elif rx_options.search(request_uri):
@@ -427,18 +473,3 @@ class UDPHandler(socketserver.BaseRequestHandler):
                 hexdump(data, ' ', 16)
                 logging.warning("---")
 
-
-if __name__ == "__main__":
-    logging.basicConfig(format='%(asctime)s:%(levelname)s:%(message)s', filename='proxy.log', level=logging.INFO,
-                        datefmt='%H:%M:%S')
-    logging.info(time.strftime("%a, %d %b %Y %H:%M:%S ", time.localtime()))
-    hostname = socket.gethostname()
-    logging.info(hostname)
-    ipaddress = socket.gethostbyname(hostname)
-    if ipaddress == "127.0.0.1":
-        ipaddress = sys.argv[1]
-    logging.info(ipaddress)
-    recordroute = "Record-Route: <sip:%s:%d;lr>" % (ipaddress, PORT)
-    topvia = "Via: SIP/2.0/UDP %s:%d" % (ipaddress, PORT)
-    server = socketserver.UDPServer((HOST, PORT), UDPHandler)
-    server.serve_forever()
